@@ -1,0 +1,238 @@
+1.pip install pypdf2 sentence-transformers faiss-cpu transformers pdfplumber 
+
+
+
+2.import pdfplumber
+import os
+import faiss
+import numpy as np
+from sentence_transformers import SentenceTransformer
+from transformers import GPT2LMHeadModel, GPT2Tokenizer
+embedding_model = SentenceTransformer('all-MiniLM-L6-v2')
+gpt_model_name = 'gpt2'  
+gpt_tokenizer = GPT2Tokenizer.from_pretrained(gpt_model_name)
+gpt_model = GPT2LMHeadModel.from_pretrained(gpt_model_name)
+index = faiss.IndexFlatL2(384)  
+def extract_pdf_text(pdf_path):
+    """
+    Extract text from the PDF file using pdfplumber.
+    """
+    with pdfplumber.open(pdf_path) as pdf:
+        text = ""
+        for page in pdf.pages:
+            page_text = page.extract_text()
+            if page_text:
+                text += page_text
+        return text
+
+def chunk_text(text, chunk_size=500):
+    """
+    Chunk text into smaller chunks of a specified size (in characters).
+    """
+    chunks = [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+    return chunks
+
+def store_embeddings(chunks):
+    """
+    Convert chunks to embeddings and store them in the FAISS index.
+    """
+    embeddings = [embedding_model.encode(chunk) for chunk in chunks]
+    embeddings = np.array(embeddings)
+    index.add(embeddings)
+
+def process_pdf(pdf_path):
+    """
+    Extract text from the PDF, chunk it, and store embeddings.
+    """
+    text = extract_pdf_text(pdf_path)
+    chunks = chunk_text(text)
+    store_embeddings(chunks)
+    return chunks
+pdf_path = r"C:\Users\Administrator.L2133\Documents\Downloads\example.pdf"  
+chunks = process_pdf(pdf_path)
+
+
+def query_to_embeddings(query):
+    """
+    Convert the user's query into an embedding.
+    """
+    return embedding_model.encode(query).reshape(1, -1)
+
+def search_relevant_chunks(query_embedding, k=5):
+    """
+    Perform a similarity search to find the top k most relevant chunks.
+    """
+    D, I = index.search(query_embedding, k)  
+    relevant_chunks = [chunks[i] for i in I[0]]  
+    return relevant_chunks
+def generate_response_with_context(context, query, max_input_length=1024, max_output_length=150):
+    """
+    Generate a response using GPT-2 based on the retrieved context.
+    Ensures the context length doesn't exceed the token limit.
+    """
+    input_text = f"Context: {context}\nQuestion: {query}\nAnswer:"
+    input_ids = gpt_tokenizer.encode(input_text, return_tensors="pt")
+    input_length = input_ids.shape[1]
+    if input_length > max_input_length:
+        print(f"Warning: The input is too long, truncating to {max_input_length} tokens.")
+        input_ids = input_ids[:, -max_input_length:]  
+    
+    output_ids = gpt_model.generate(
+        input_ids,
+        max_length=input_length + max_output_length,  
+        num_return_sequences=1,
+        no_repeat_ngram_size=2,  
+        top_p=0.95,  
+        top_k=50, 
+        temperature=0.7,  
+        do_sample=True  
+    )
+    
+    response = gpt_tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    
+    answer_start = response.find("Answer:")
+    if answer_start != -1:
+        response = response[answer_start + len("Answer:"):].strip()
+
+    return response
+
+# Step 4: Comparison Queries - Identify and extract fields to compare
+def compare_data(query, chunked_data):
+    """
+    Handle comparison queries by extracting and aggregating relevant data.
+    """
+    relevant_chunks = search_relevant_chunks(query_to_embeddings(query))
+    aggregated_data = "\n".join(relevant_chunks)
+    return aggregated_data
+query = "What is the unemployment information based on degree type?"
+relevant_chunks = search_relevant_chunks(query_to_embeddings(query))
+context = " ".join(relevant_chunks)  
+response = generate_response_with_context(context, query)
+print(f"Response: {response}")
+compare_query = "Compare the unemployment rates for Bachelor's and Master's degree holders"
+comparison_data = compare_data(compare_query, chunks)
+print(f"Comparison: {comparison_data}")
+
+
+
+
+
+
+
+
+3.pip install requests beautifulsoup4 transformers faiss-cpu sentence-transformers
+
+import requests
+from bs4 import BeautifulSoup
+
+def scrape_website(url):
+    response = requests.get(url)
+    soup = BeautifulSoup(response.content, 'html.parser')
+
+    
+    paragraphs = soup.find_all('p')
+    text_content = ' '.join([para.get_text() for para in paragraphs])
+    return text_content
+
+
+urls = [
+    'https://www.uchicago.edu/',
+    'https://www.washington.edu/',
+    'https://www.stanford.edu/',
+    'https://und.edu/'
+]
+
+website_data = {}
+for url in urls:
+    website_data[url] = scrape_website(url)
+    print(f"Scraped content from {url}")
+
+
+
+4.from sentence_transformers import SentenceTransformer
+import numpy as np
+
+
+model = SentenceTransformer('all-MiniLM-L6-v2')
+
+
+def convert_to_embeddings(text):
+    return model.encode(text, convert_to_tensor=True)
+
+
+def split_into_chunks(text, chunk_size=512):
+    """Split text into chunks of approximately `chunk_size` tokens."""
+    words = text.split()  
+    chunks = []
+    chunk = []
+    
+    for word in words:
+        chunk.append(word)
+        if len(chunk) >= chunk_size:
+            chunks.append(' '.join(chunk))
+            chunk = []
+    
+    if chunk:
+        chunks.append(' '.join(chunk))  
+    
+    return chunks
+
+
+
+website_embeddings = {}
+
+for url, content in website_data.items():
+    
+    content_chunks = split_into_chunks(content)
+    
+   
+    chunk_embeddings = []
+    for chunk in content_chunks:
+        chunk_embedding = convert_to_embeddings(chunk)
+        chunk_embeddings.append(chunk_embedding)
+    
+
+    website_embeddings[url] = {
+        'chunks': content_chunks,
+        'embeddings': chunk_embeddings
+    }
+    
+    print(f"Generated embeddings for {url}")
+def query_to_embedding(query):
+    return model.encode(query)
+
+def perform_similarity_search(query_embedding, faiss_index, k=5):
+    distances, indices = faiss_index.search(np.array([query_embedding]), k)
+    return indices[0]
+user_query = "What are the main research areas at Stanford?"
+query_embedding = query_to_embedding(user_query)
+top_k_indices = perform_similarity_search(query_embedding, faiss_index)
+
+relevant_chunks = []
+for idx in top_k_indices:
+    website_url = list(website_data.keys())[idx]
+    relevant_chunks.append(website_data[website_url])
+    print(f"Found relevant chunk from: {website_url}")
+
+
+
+
+
+
+
+
+5.from transformers import GPT2LMHeadModel, GPT2Tokenizer
+model_name = "gpt2"  
+tokenizer = GPT2Tokenizer.from_pretrained(model_name)
+model = GPT2LMHeadModel.from_pretrained(model_name)
+
+def generate_response_with_context(context, query):
+    input_text = f"Context: {context}\nQuestion: {query}\nAnswer:"
+    input_ids = tokenizer.encode(input_text, return_tensors="pt")
+    output_ids = model.generate(input_ids, max_length=150, num_return_sequences=1)
+    response = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+    return response
+context = " ".join(relevant_chunks) 
+response = generate_response_with_context(context, user_query)
+print(f"Response: {response}")
+
